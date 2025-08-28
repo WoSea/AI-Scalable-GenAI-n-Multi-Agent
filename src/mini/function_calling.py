@@ -5,7 +5,6 @@
 # Test Query
 '''
 I want to book a room from August 29 to August 30 for 2 people at Ho Chi Minh City
-
 How is the weather in Ho Chi Minh City today?
 '''
 import json
@@ -50,13 +49,14 @@ def get_weather(city: str):
         "description": data["weather"][0]["description"],
         "link": "https://www.accuweather.com/vi/vn/ho-chi-minh-city/353981/hourly-weather-forecast/353981"
     }
+    print(f"\nweather: {weather}")
     return weather
 
 # Function schema
 booking_api_function = {
         "type": "function",
         "function": {
-            "name": "booking_api_function",
+            "name": "booking_api",
             "description": "Get hotel booking information",
             "parameters": {
                 "type": "object",
@@ -72,7 +72,7 @@ booking_api_function = {
 get_weather_function = { 
         "type": "function",
         "function": {
-            "name": "get_weather_function",
+            "name": "get_weather",
             "description": "Get real-time weather information for a city",
             "parameters": {
                 "type": "object",
@@ -85,9 +85,17 @@ get_weather_function = {
 }
 
 # Chatbot
+SYSTEM_PROMPT = """You are a helpful AI assistant. 
+- Always use results from tools when available. 
+- If user booked a hotel, confirm booking details (hotel name, checkin, checkout, people, price). 
+- If user asked about weather, summarize weather clearly (temperature °C, humidity %, description). 
+- If both booking and weather are available, combine results naturally in one answer. 
+- If weather info is provided, remind the user they can check more at the provided link.
+- Be concise and friendly.
+"""
 def chatbot():
     print("Assistant (type 'quit' to exit)")
-    context = []
+    context = [{"role": "system", "content": SYSTEM_PROMPT}]
     while True:
         user_input = input("You: ")
         # Tôi muốn đặt phòng từ ngày 29/8 đến 30/8 cho 2 người # I want to book a room from August 29 to August 30 for 2 people
@@ -103,7 +111,7 @@ def chatbot():
         )
 
         msg = response["message"]
-        print(f"MSG: {msg}")
+        print(f"\n MSG: {msg}")
         '''
         Assistant (type 'quit' to exit)
         You: hi
@@ -118,50 +126,62 @@ def chatbot():
         MSG: role='assistant' content='' thinking=None images=None tool_name=None tool_calls=[ToolCall(function=Function(name='booking_api', arguments={'checkin': '2023-08-29', 'checkout': '2023-08-30', 'people': 2}))]
 
         '''
+        print(f"\n msg.tool_calls: {msg.tool_calls}")
         if msg.tool_calls:
             tool_results = []
+            have_get_weather_function = False
             for tool in msg.tool_calls:
                 if tool.function.name == 'booking_api_function':
                     result = booking_api(**tool.function.arguments)
+                    print(f"\nresult 1: {result}")
                 elif tool.function.name == 'get_weather_function':
+                    have_get_weather_function = True
                     result = get_weather(**tool.function.arguments)
+                    print(f"\nresult 2: {result}")
                 else:
                     result = {"error": "Function not implemented"}
+                    print(f"\nresult 3: {result}")
+
                 tool_results.append({
                     "role": "tool",
                     "name": tool.function.name,
                     "content": json.dumps(result)
                 })
+            print(f"\n tool_results: {tool_results}")
+            # Add function result to context
+            context.append({"role": "user", "content": user_input})
+            context.append(msg)  # function call
+            context.extend(tool_results)
 
-                # Add function result to context
-                context.append({"role": "user", "content": user_input})
-                context.append(msg)  # function call
-                context.extend(tool_results)
+            print(f"[DEBUG] Context: {context}")
 
-                # Model continues to respond based on function result
-                final_response = ollama.chat(model="mistral", messages=context)
-                final_text = final_response["message"]["content"]
-                print("Assistant:", final_text)
-                context.append(final_response["message"])
+            # Model continues to respond based on function result
+            final_response = ollama.chat(model="mistral", messages=context)
+            final_text = final_response["message"]["content"]
+            print(f"\n Assistant: {final_text}")
+            context.append(final_response["message"])
 
-                # Send data to API
-                # try:
-                #     save_url = "http://localhost/api/v1/data/save"
-                #     payload = {"query": user_input, "response": final_text}
-                #     r = requests.post(save_url, json=payload)
-                #     print(f"[ACTION] Posted to {save_url}, status={r.status_code}")
-                # except Exception as e:
-                #     print("[ERROR] Failed to post data:", e)
+            # Send data to API
+            # try:
+            #     save_url = "http://localhost/api/v1/data/save"
+            #     payload = {"query": user_input, "response": final_text}
+            #     r = requests.post(save_url, json=payload)
+            #     print(f"[ACTION] Posted to {save_url}, status={r.status_code}")
+            # except Exception as e:
+            #     print("[ERROR] Failed to post data:", e)
 
-                # open browser & post API
-                if tool.function.name == "get_weather_function":
-                    # Open web browser to AccuWeather
-                    link = result.get("link")
-                    if link:
-                        print(f"[ACTION] Opening browser: {link}")
-                        # webbrowser_open.open(link)
+            # open browser if weather link
+            if have_get_weather_function:
+                for tr in tool_results:
+                    if tr["name"] == "get_weather":
+                        link = json.loads(tr["content"]).get("link")
+                        print(f"\nlink: {link}")
+                        if link:
+                            print(f"\n[ACTION] Opening browser: {link}")
+                            # webbrowser_open.open(link)
+
         else:
-            print("Assistant:", msg["content"])
+            print(f"\n Assistant: {msg['content']}")
             context.append({"role": "user", "content": user_input})
             context.append(msg)
 
