@@ -65,3 +65,12 @@ ollama pull llama3.2
 ollama pull nomic-embed-text
 
 ```
+
+## Milvus
+https://github.com/milvus-io/milvus
+```bash
+docker run -d --name milvus-standalone \
+  -p 19530:19530 -p 9091:9091 \
+  milvusdb/milvus:v2.4.0-rc.1-20240528 \
+  standalone
+```

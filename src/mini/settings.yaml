@@ -1,0 +1,16 @@
+llm:
+  provider: "ollama"
+  model: "mistral"
+  api_base: "http://localhost:11434"
+  temperature: 0.2
+  max_tokens: 1024
+
+embedding:
+  provider: "ollama"
+  model: "nomic-embed-text"   # "mistral"  
+  api_base: "http://localhost:11434"
+
+vectorstore:
+  provider: "milvus"
+  uri: "tcp://localhost:19530"
+  collection: "rag_docs"
