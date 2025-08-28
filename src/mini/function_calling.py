@@ -1,3 +1,13 @@
+# ollama pull mistral
+# Create .env file with content: OPENWEATHER_API_KEY="your_api"
+# Test Query
+'''
+Tôi muốn đặt phòng từ ngày 29/8 đến 30/8 cho 2 người
+I want to book a room from August 29 to August 30 for 2 people
+
+Thời tiết ở thành phố Hồ Chí Minh hôm nay thế nào?
+How is the weather in Ho Chi Minh City today?
+'''
 import json
 import requests
 import os
@@ -9,7 +19,7 @@ import ollama
 load_dotenv()
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-# ---- Fake booking API ----
+# Fake booking API
 def booking_api(checkin: str, checkout: str, people: int):
     return {
         "hotel": "Grand Riverside",
@@ -20,7 +30,7 @@ def booking_api(checkin: str, checkout: str, people: int):
         "currency": "USD",
     }
 
-# ---- Real weather API ----
+# Real weather API
 def get_weather(city: str):
     # Get Geo coords from another api https://openweathermap.org/find?q=Ho+CHI+MINH
     lat = 10.8333
