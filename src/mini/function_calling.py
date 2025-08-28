@@ -4,10 +4,8 @@
 # Create .env file with content: OPENWEATHER_API_KEY="your_api"
 # Test Query
 '''
-Tôi muốn đặt phòng từ ngày 29/8 đến 30/8 cho 2 người
-I want to book a room from August 29 to August 30 for 2 people
+I want to book a room from August 29 to August 30 for 2 people at Ho Chi Minh City
 
-Thời tiết ở thành phố Hồ Chí Minh hôm nay thế nào?
 How is the weather in Ho Chi Minh City today?
 '''
 import json
@@ -41,7 +39,7 @@ def get_weather(city: str):
     url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&lang=vi"
     r = requests.get(url)
     data = r.json()
-
+    print("Weather API response:", data)
     if r.status_code != 200 or "main" not in data:
         return {"error": "Can not get weather data"}
     
@@ -121,6 +119,7 @@ def chatbot():
 
         '''
         if msg.tool_calls:
+            tool_results = []
             for tool in msg.tool_calls:
                 if tool.function.name == 'booking_api_function':
                     result = booking_api(**tool.function.arguments)
@@ -128,11 +127,16 @@ def chatbot():
                     result = get_weather(**tool.function.arguments)
                 else:
                     result = {"error": "Function not implemented"}
+                tool_results.append({
+                    "role": "tool",
+                    "name": tool.function.name,
+                    "content": json.dumps(result)
+                })
 
                 # Add function result to context
                 context.append({"role": "user", "content": user_input})
                 context.append(msg)  # function call
-                context.append({"role": "tool", 'name': tool.function.name, "content": json.dumps(result)})
+                context.extend(tool_results)
 
                 # Model continues to respond based on function result
                 final_response = ollama.chat(model="mistral", messages=context)
