@@ -1,3 +1,4 @@
+# https://github.com/microsoft/graphrag
 # pip install graphrag  - Requires-Python <3.13,>=3.10  <= 3.12.11
 # pip install pypandoc unstructured pymupdf pymilvus
 # ollama pull mistral
