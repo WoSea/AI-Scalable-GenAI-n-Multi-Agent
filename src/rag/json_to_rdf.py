@@ -17,7 +17,7 @@ for item in data:
     g.serialize("src/data/employees.ttl", format="turtle")
     g.serialize("src/data/employees.rdf", format="xml")
 
-
+# https://neo4j.com/docs/getting-started/data-modeling/tutorial-data-modeling/
 # Open Neo4j http://localhost:7687
 # Create the n10s configuration: CALL n10s.graphconfig.init()
 # Load RDF Data: CALL n10s.rdf.import.fetch("file:///src/data/employees.ttl", "Turtle")
