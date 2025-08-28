@@ -1,4 +1,6 @@
+# pip install webbrowser-open dotenv ollama
 # ollama pull mistral
+# ollama run mistral to check model
 # Create .env file with content: OPENWEATHER_API_KEY="your_api"
 # Test Query
 '''
@@ -11,7 +13,7 @@ How is the weather in Ho Chi Minh City today?
 import json
 import requests
 import os
-import webbrowser
+import webbrowser_open
 from dotenv import load_dotenv
 import ollama
 
@@ -53,32 +55,36 @@ def get_weather(city: str):
     return weather
 
 # Function schema
-functions = [
-    {
-        "name": "booking_api",
-        "description": "Get hotel booking information",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "checkin": {"type": "string", "description": "Check-in date (YYYY-MM-DD)"},
-                "checkout": {"type": "string", "description": "Check-out date (YYYY-MM-DD)"},
-                "people": {"type": "integer", "description": "Number of people"},
+booking_api_function = {
+        "type": "function",
+        "function": {
+            "name": "booking_api",
+            "description": "Get hotel booking information",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkin": {"type": "string", "description": "Check-in date (YYYY-MM-DD)"},
+                    "checkout": {"type": "string", "description": "Check-out date (YYYY-MM-DD)"},
+                    "people": {"type": "integer", "description": "Number of people"},
+                },
+                "required": ["checkin", "checkout", "people"],
             },
-            "required": ["checkin", "checkout", "people"],
         },
-    },
-    {
-        "name": "get_weather",
-        "description": "Get real-time weather information for a city",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "city": {"type": "string", "description": "City name (e.g. 'Ho Chi Minh City')"},
+}
+get_weather_function = { 
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get real-time weather information for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "City name (e.g. 'Ho Chi Minh City')"},
+                },
+                "required": ["city"],
             },
-            "required": ["city"],
         },
-    }
-]
+}
 
 # Chatbot
 def chatbot():
@@ -95,50 +101,61 @@ def chatbot():
         response = ollama.chat(
             model="mistral",
             messages=context + [{"role": "user", "content": user_input}],
-            options={"functions": functions},
+            tools=[booking_api, get_weather],
         )
 
         msg = response["message"]
+        print(f"MSG: {msg}")
+        '''
+        Assistant (type 'quit' to exit)
+        You: hi
+        MSG: role='assistant' content=' Hello! How can I assist you today? Here are a few functions that I have:\n\n1. `booking_api` - Get hotel booking information. It requires the check-in date, check-out date, and number of people as parameters.\n2. `get_weather` - Get real-time weather information for a city. It requires the city name as a parameter.\n\nIf you need any help with these functions or have any other queries, feel free to ask!' thinking=None images=None tool_name=None tool_calls=None
+        Assistant:  Hello! How can I assist you today? Here are a few functions that I have:
 
-        if "function_call" in msg:
-            fn = msg["function_call"]["name"]
-            args = json.loads(msg["function_call"]["arguments"])
-            print(f"[DEBUG] Calling function {fn} with args {args}")
+        1. `booking_api` - Get hotel booking information. It requires the check-in date, check-out date, and number of people as parameters.
+        2. `get_weather` - Get real-time weather information for a city. It requires the city name as a parameter.
 
-            if fn == "booking_api":
-                result = booking_api(**args)
-            elif fn == "get_weather":
-                result = get_weather(**args)
-            else:
-                result = {"error": "Function not implemented"}
+        If you need any help with these functions or have any other queries, feel free to ask!
+        You: Tôi muốn đặt phòng từ ngày 29/8 đến 30/8 cho 2 người
+        MSG: role='assistant' content='' thinking=None images=None tool_name=None tool_calls=[ToolCall(function=Function(name='booking_api', arguments={'checkin': '2023-08-29', 'checkout': '2023-08-30', 'people': 2}))]
 
-            # Add function result to context
-            context.append({"role": "user", "content": user_input})
-            context.append(msg)  # function call
-            context.append({"role": "function", "name": fn, "content": json.dumps(result)})
+        '''
+        if msg.tool_calls:
+            for tool in msg.tool_calls:
+                if tool.function.name == 'booking_api_function':
+                    result = booking_api(**tool.function.arguments)
+                elif tool.function.name == 'get_weather_function':
+                    result = get_weather(**tool.function.arguments)
+                else:
+                    result = {"error": "Function not implemented"}
 
-            # Model continues to respond based on function result
-            final_response = ollama.chat(model="mistral", messages=context)
-            final_text = final_response["message"]["content"]
-            print("Assistant:", final_text)
-            context.append(final_response["message"])
+                # Add function result to context
+                context.append({"role": "user", "content": user_input})
+                context.append(msg)  # function call
+                context.append({"role": "tool", 'name': tool.function.name, "content": json.dumps(result)})
 
-            # Send data to API
-            try:
-                save_url = "http://localhost/api/v1/data/save"
-                payload = {"query": user_input, "response": final_text}
-                r = requests.post(save_url, json=payload)
-                print(f"[ACTION] Posted to {save_url}, status={r.status_code}")
-            except Exception as e:
-                print("[ERROR] Failed to post data:", e)
+                # Model continues to respond based on function result
+                final_response = ollama.chat(model="mistral", messages=context)
+                final_text = final_response["message"]["content"]
+                print("Assistant:", final_text)
+                context.append(final_response["message"])
 
-            # open browser & post API
-            if fn == "get_weather":
-                # Open web browser to AccuWeather
-                link = result.get("link")
-                if link:
-                    print(f"[ACTION] Opening browser: {link}")
-                    webbrowser.open(link)
+                # Send data to API
+                # try:
+                #     save_url = "http://localhost/api/v1/data/save"
+                #     payload = {"query": user_input, "response": final_text}
+                #     r = requests.post(save_url, json=payload)
+                #     print(f"[ACTION] Posted to {save_url}, status={r.status_code}")
+                # except Exception as e:
+                #     print("[ERROR] Failed to post data:", e)
+
+                # open browser & post API
+                if tool.function.name == "get_weather_function":
+                    # Open web browser to AccuWeather
+                    link = result.get("link")
+                    if link:
+                        print(f"[ACTION] Opening browser: {link}")
+                        # webbrowser_open.open(link)
         else:
             print("Assistant:", msg["content"])
             context.append({"role": "user", "content": user_input})
