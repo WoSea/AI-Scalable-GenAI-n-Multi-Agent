@@ -56,7 +56,7 @@ def get_weather(city: str):
 booking_api_function = {
         "type": "function",
         "function": {
-            "name": "booking_api",
+            "name": "booking_api_function",
             "description": "Get hotel booking information",
             "parameters": {
                 "type": "object",
@@ -72,7 +72,7 @@ booking_api_function = {
 get_weather_function = { 
         "type": "function",
         "function": {
-            "name": "get_weather",
+            "name": "get_weather_function",
             "description": "Get real-time weather information for a city",
             "parameters": {
                 "type": "object",
@@ -99,7 +99,7 @@ def chatbot():
         response = ollama.chat(
             model="mistral",
             messages=context + [{"role": "user", "content": user_input}],
-            tools=[booking_api, get_weather],
+            tools=[booking_api_function, get_weather_function],
         )
 
         msg = response["message"]
