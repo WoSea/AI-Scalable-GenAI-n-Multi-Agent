@@ -24,6 +24,7 @@ Put PDF/DOCX files in "./data_files/" or pass a list of files to ingest_files(..
 """
 
 import os
+from pathlib import Path
 import sys
 import json
 import numpy as np
@@ -65,13 +66,15 @@ except Exception:
 
 try:
     import docling
+    from docling.document_converter import DocumentConverter
     _HAS_DOCLING = True
 except Exception:
     docling = None
     _HAS_DOCLING = False
 
 try:
-    import langextract
+    import langextract as lx # uses LLMs to extract structured information from unstructured text documents
+    import textwrap
     _HAS_LANGEXTRACT = True
 except Exception:
     langextract = None
@@ -126,6 +129,47 @@ def chunk_text_by_words(text: str, max_words: int = CHUNK_MAX_WORDS, overlap: in
     return chunks
 
 # ========= File extraction & Markdown conversion =========
+def extract_with_langextract(file_path: str, model_id: str = "gemini-2.5-flash") -> str:
+    """
+    Using langextract to analyze content => Markdown
+    """
+    prompt = textwrap.dedent("""\
+        Extract characters, emotions, and relationships in order of appearance.
+        Use exact text for extractions. Do not paraphrase or overlap entities.
+        Provide meaningful attributes for each entity to add context.""")
+
+    examples = [
+        lx.data.ExampleData(
+            text="Alice smiled at Bob.",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="character",
+                    extraction_text="Alice"
+                ),
+                lx.data.Extraction(
+                    extraction_class="character",
+                    extraction_text="Bob"
+                ),
+                lx.data.Extraction(
+                    extraction_class="emotion",
+                    extraction_text="smiled",
+                    attributes={"feeling": "happiness"}
+                )
+            ]
+        )
+    ]
+
+    input_text = Path(file_path).read_text(encoding="utf-8")
+    # Run extraction
+    result = lx.extract(
+        text_or_documents=input_text,
+        prompt_description=prompt,
+        examples=examples,
+        model_id=model_id,
+    )
+
+    return result.to_markdown()
+
 def convert_with_markitdown(input_path: str) -> str:
     """
     Try to convert a document to Markdown using the 'markitdown' CLI if available.
@@ -158,6 +202,11 @@ def convert_with_markitdown(input_path: str) -> str:
                 pass
         # fallback - raise so caller can try other extractors
         raise e
+
+def extract_with_docling(path: str) -> str:
+    converter = DocumentConverter()
+    result = converter.convert(path)
+    return result.document.export_to_markdown()
 
 def extract_text_from_pdf_pymupdf(path: str) -> str:
     """
@@ -221,25 +270,10 @@ def convert_file_to_markdown(filepath: str, prefer_order: List[str] = None) -> s
                 else:
                     continue
 
-            if method == "docling" and ext in (".docx", ".doc", ".pdf"):
+            if method == "docling" and ext in (".docx", ".doc"):
                 if _HAS_DOCLING:
-                    # docling usage may vary; attempt a generic call if available
-                    try:
-                        # docling may expose a Reader to load documents
-                        reader = getattr(docling, "Reader", None)
-                        if reader:
-                            r = reader(filepath)
-                            text = r.text if hasattr(r, "text") else "\n".join(r.paragraphs)
-                            print(f"[extract] used docling.Reader for {filepath}")
-                            return text
-                        # fallback to docling.parse_file
-                        if hasattr(docling, "parse_file"):
-                            text = docling.parse_file(filepath)
-                            print(f"[extract] used docling.parse_file for {filepath}")
-                            return text
-                    except Exception as e:
-                        last_exc = e
-                        continue
+                    print(f"[extract] used docling for {filepath}")
+                    return extract_with_docling(filepath)
                 else:
                     continue
 
@@ -251,14 +285,20 @@ def convert_file_to_markdown(filepath: str, prefer_order: List[str] = None) -> s
                 else:
                     continue
 
+            if method == "langextract" and ext in (".txt",):
+                if _HAS_LANGEXTRACT:
+                    md = extract_with_langextract(filepath)
+                    print(f"[extract] used langextract for {filepath}")
+                    return md
+                else:
+                    continue
+
             if method == "txt" and ext in (".txt",):
-                # simple read
                 with open(filepath, "r", encoding="utf-8") as f:
                     txt = f.read()
                 print(f"[extract] used plain text read for {filepath}")
                 return txt
 
-            # Add additional handlers if needed (e.g. call langextract tools)
         except Exception as e:
             last_exc = e
             continue
