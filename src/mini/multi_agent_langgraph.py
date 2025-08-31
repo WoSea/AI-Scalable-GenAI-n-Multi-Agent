@@ -22,6 +22,8 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain.docstore.document import Document
 
+import matplotlib.pyplot as plt
+
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")  # "llama3.2" "mistral"
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0"))
 
@@ -199,6 +201,13 @@ if __name__ == "__main__":
     result = app.invoke({"input": query})
     print("\n=== FINAL OUTPUT ===\n")
     print(result["final_output"])
+
+    nx_graph = app.get_graph()
+
+    import networkx as nx
+    pos = nx.spring_layout(nx_graph)
+    nx.draw(nx_graph, pos, with_labels=True, node_size=2500, node_color="lightblue", font_size=10, font_weight="bold")
+    plt.show()
 
 # https://docs.langchain.com/langsmith/observability-quickstart
 # Using LangGraph, AutoGen, or CrewAI for multi-agent orchestration, and integrate LangSmith for LLM observability.
