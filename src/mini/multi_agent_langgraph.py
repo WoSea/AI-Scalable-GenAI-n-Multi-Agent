@@ -8,7 +8,7 @@ from typing import Dict, Any
 from langgraph.graph import StateGraph, END
 # LangChain
 from langchain.chat_models import ChatOpenAI, ChatOllama # site-packages\langchain\chat_models\__init__.py
-from langchain.tools import DuckDuckGoSearchRun
+from langchain_community.tools.ddg_search.tool import DuckDuckGoSearchRun
 from langchain.agents import Tool
 # Prompts & Chains
 from langchain.prompts import PromptTemplate
@@ -22,7 +22,17 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain.docstore.document import Document
 
+from langchain_community.graphs import Neo4jGraph
+
 import matplotlib.pyplot as plt
+
+
+# Connect Neo4j
+neo4j_graph = Neo4jGraph(
+    url="bolt://localhost:7687", 
+    username="neo4j", 
+    password="password"
+)
 
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")  # "llama3.2" "mistral"
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0"))
@@ -48,6 +58,30 @@ def remember(role: str, content: str) -> None:
         memory.chat_memory.add_user_message(content)
     else:
         memory.chat_memory.add_ai_message(content)
+
+def push_history_to_neo4j():
+    """
+    Push the conversation history (user & AI messages) into Neo4j.
+    Each user query => node (:UserQuery)
+    Each AI response => node (:AIResponse)
+    Relationship: (UserQuery)-[:ANSWERED_WITH]=>(AIResponse)
+    """
+    try:
+        messages = memory.chat_memory.messages
+    except Exception:
+        return
+    
+    for i in range(0, len(messages), 2):  # user -> ai theo cặp
+        if i+1 < len(messages):
+            user_msg = messages[i].content
+            ai_msg = messages[i+1].content
+            
+            cypher = """
+            MERGE (u:UserQuery {text: $user_msg})
+            MERGE (a:AIResponse {text: $ai_msg})
+            MERGE (u)-[:ANSWERED_WITH]->(a)
+            """
+            neo4j_graph.query(cypher, {"user_msg": user_msg, "ai_msg": ai_msg})
 
 # Tools (Retriever uses search)
 # tools = [
@@ -142,9 +176,23 @@ def retriever_node(state: Dict[str, Any]) -> Dict[str, Any]:
     Elon Musk confirmed SpaceX Starship will attempt an uncrewed Mars mission within this decade.
     (Source: nasa.gov, space.com, reuters.com)
     '''
-    # RAG with FAISS + OllamaEmbeddings
+    # Parse tool_results => add to Neo4j as nodes & relationships
+    neo4j_graph.query("""
+    MERGE (a:Agency {name: 'NASA'})
+    MERGE (m:MarsMission {name: 'Perseverance drilling samples', date: '2025-08'})
+    MERGE (a)-[:ANNOUNCED]->(m)
+    """)
+
+    # Query Neo4j for relevant missions
+    cypher = """
+    MATCH (a:Agency)-[r]->(m:MarsMission)
+    RETURN a.name, type(r), m.name, m.date
+    """
+    kg_results = neo4j_graph.query(cypher)
+
+    # RAG with FAISS + OllamaEmbeddings + Neo4j
     embeddings = OllamaEmbeddings(model=OLLAMA_MODEL)
-    docs = [Document(page_content=tool_results)]  # append more context from crawling, files about Mars exploration
+    docs = [Document(page_content=tool_results + str(kg_results))]  # append more context from crawling, files about Mars exploration
     vectorstore = FAISS.from_documents(docs, embeddings) # save DuckDuckGo results to FAISS
     # Retrieve top chunks (one doc), help LLM focus on relevant context
     retrieved_docs = vectorstore.similarity_search(query_plan, k=1) # Embedding query_plan 
@@ -180,6 +228,9 @@ def summarizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     )
     remember("ai", f"[Summarizer]\n{final_output}")
     log_step("Summarizer Node", state["retrieved_info"], final_output)
+        
+    # Push full conversation (user + AI) into Neo4j
+    push_history_to_neo4j()
     return {"final_output": final_output, "step": END}
 
 # Build the Graph
