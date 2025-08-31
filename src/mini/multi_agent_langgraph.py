@@ -199,3 +199,6 @@ if __name__ == "__main__":
     result = app.invoke({"input": query})
     print("\n=== FINAL OUTPUT ===\n")
     print(result["final_output"])
+
+# https://docs.langchain.com/langsmith/observability-quickstart
+# Using LangGraph, AutoGen, or CrewAI for multi-agent orchestration, and integrate LangSmith for LLM observability.
