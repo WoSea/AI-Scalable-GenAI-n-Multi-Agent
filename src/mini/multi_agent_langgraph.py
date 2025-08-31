@@ -17,6 +17,11 @@ from langchain.chains import LLMChain
 # Conversation memory
 from langchain.memory import ConversationBufferMemory
 
+# FAISS RAG
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain.docstore.document import Document
+
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")  # "llama3.2" "mistral"
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0"))
 
@@ -92,6 +97,14 @@ summarizer_prompt = PromptTemplate.from_template(
 summarizer_chain = LLMChain(llm=llm, prompt=summarizer_prompt)
 
 # Node Functions (LangGraph)
+def log_step(name: str, input_data: Any, output_data: Any):
+    print(f"\n=== {name} ===")
+    print("Input:")
+    print(input_data)
+    print("Output:")
+    print(output_data)
+    print("="*50)
+
 def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Input:  state['input'] - user request
@@ -103,7 +116,7 @@ def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     steps = planner_chain.run({"input": user_input, "history": get_history_text()})
     remember("ai", f"[Planner]\n{steps}")
-
+    log_step("Planner Node", user_input, steps)
     return {"planner_output": steps, "step": "retrieve"}
 
 def retriever_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -112,25 +125,47 @@ def retriever_node(state: Dict[str, Any]) -> Dict[str, Any]:
     Output: retrieved_info - raw findings (may include URLs/snippets)
             step           - next node id
     """
+    # query_plan = "Latest Mars exploration updates August 2025"
     query_plan = state["planner_output"]
     # Option A (tool-less): let LLM compose a query & summarize results itself.
     # Option B (hybrid): actually call the search tool to fetch snippets, then ask LLM to organize.
     
-    # From Option A& B => fetch with tool, then ask LLM to organize + add context.
+    # From Option A& B + FAISS => fetch with tool, then ask LLM to organize + add context.
 
     # tool call
-    tool_results = search.run(query_plan)
+    tool_results = search.run(query_plan) # search results from DuckDuckGo
+    '''tool_results
+    NASA's Perseverance rover has begun drilling new rock samples in Jezero Crater (Aug 2025).
+    China announced plans for a Mars sample return mission in 2028.
+    Elon Musk confirmed SpaceX Starship will attempt an uncrewed Mars mission within this decade.
+    (Source: nasa.gov, space.com, reuters.com)
+    '''
+    # RAG with FAISS + OllamaEmbeddings
+    embeddings = OllamaEmbeddings(model=OLLAMA_MODEL)
+    docs = [Document(page_content=tool_results)]  # append more context from crawling, files about Mars exploration
+    vectorstore = FAISS.from_documents(docs, embeddings) # save DuckDuckGo results to FAISS
+    # Retrieve top chunks (one doc), help LLM focus on relevant context
+    retrieved_docs = vectorstore.similarity_search(query_plan, k=1) # Embedding query_plan 
+    '''retrieved_docs
+    [
+        Document(page_content="NASA's Perseverance rover has begun drilling new rock samples in Jezero Crater (Aug 2025). China announced plans for a Mars sample return mission in 2028. Elon Musk confirmed SpaceX Starship will attempt an uncrewed Mars mission within this decade. (Source: nasa.gov, space.com, reuters.com)")
+    ]
+    '''
+    rag_text = "\n".join(d.page_content for d in retrieved_docs)
 
-    # LLm format n enrich
+    # Ask LLM to clean/organize
     retrieved_info = retriever_chain.run(
-        {"planner_output": query_plan, "history": get_history_text()}
+        {"planner_output": rag_text, "history": get_history_text()}
     )
-
-    # Merge tool raw result into the retrieved_info for more grounding
-    merged_info = f"{retrieved_info}\n\n[Raw search result]\n{tool_results[:2000]}"
-
-    remember("ai", f"[Retriever]\n{merged_info}")
-    return {"retrieved_info": merged_info, "step": "summarize"}
+    ''' retrieved_info
+        - Perseverance rover drilled new samples in Jezero Crater (Aug 2025).
+        - China aims for Mars sample return mission in 2028.
+        - SpaceX targets uncrewed Starship Mars mission this decade.
+        (Sources: NASA, Space.com, Reuters)
+    '''
+    remember("ai", f"[Retriever]\n{retrieved_info}")
+    log_step("Retriever Node", query_plan, retrieved_info)
+    return {"retrieved_info": retrieved_info, "step": "summarize"}
 
 def summarizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -142,27 +177,25 @@ def summarizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         {"retrieved_info": state["retrieved_info"], "history": get_history_text()}
     )
     remember("ai", f"[Summarizer]\n{final_output}")
+    log_step("Summarizer Node", state["retrieved_info"], final_output)
     return {"final_output": final_output, "step": END}
 
 # Build the Graph
 def build_app():
-    graph = StateGraph(dict)  # dict-based state
+    graph = StateGraph(dict)
     graph.add_node("planner", planner_node)
     graph.add_node("retrieve", retriever_node)
     graph.add_node("summarize", summarizer_node)
-
     graph.set_entry_point("planner")
     graph.add_edge("planner", "retrieve")
     graph.add_edge("retrieve", "summarize")
     graph.add_edge("summarize", END)
-
     return graph.compile()
 
 # Run the Multi-Agent System
 if __name__ == "__main__":
     app = build_app()
-    # Example query (recent topic to exercise web search)
-    user_request = "Tell me what's new about Mars exploration this month."
-    result = app.invoke({"input": user_request})
-    print("\n=== Final Output ===\n")
-    print(result.get("final_output", "No output"))
+    query = "Tell me what's new about Mars exploration this month."
+    result = app.invoke({"input": query})
+    print("\n=== FINAL OUTPUT ===\n")
+    print(result["final_output"])
